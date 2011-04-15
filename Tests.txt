@@ -1,0 +1,157 @@
+How to get angle of (x,y) vector...
+
+maxD,a = 0,tuple((180*math.atan((x+0.5)/16)/math.pi for x in xrange(17)))
+for x,y in tuple((6,y) for y in xrange(7))+tuple((6-x,6) for x in xrange(1,7)):
+    fat = a[16*y/x] if y<=x else 90-a[16*x/y] if y else 0
+    at = 180*math.atan2(y,x)/math.pi
+    D = abs(fat-at)
+    maxD = max(maxD,D)
+    print "(%d,%d):"%(x,y),"%5.1f ~= %5.1f"%(fat,at),"D=",D,"Max=",maxD
+
+(6,0):   1.8 ~=   0.0 D= 1.78991060825 Max= 1.78991060825
+(6,1):   8.9 ~=   9.5 D= 0.581663057505 Max= 1.78991060825
+(6,2):  19.0 ~=  18.4 D= 0.535458985565 Max= 1.78991060825
+(6,3):  28.0 ~=  26.6 D= 1.4144232114 Max= 1.78991060825
+(6,4):  33.3 ~=  33.7 D= 0.415179541145 Max= 1.78991060825
+(6,5):  40.2 ~=  39.8 D= 0.350428532654 Max= 1.78991060825
+(6,6):  45.9 ~=  45.0 D= 0.881403996582 Max= 1.78991060825
+(5,6):  49.8 ~=  50.2 D= 0.350428532654 Max= 1.78991060825
+(4,6):  56.7 ~=  56.3 D= 0.415179541145 Max= 1.78991060825
+(3,6):  62.0 ~=  63.4 D= 1.4144232114 Max= 1.78991060825
+(2,6):  71.0 ~=  71.6 D= 0.535458985565 Max= 1.78991060825
+(1,6):  81.1 ~=  80.5 D= 0.581663057505 Max= 1.78991060825
+(0,6):  88.2 ~=  90.0 D= 1.78991060825 Max= 1.78991060825
+
+timeit.Timer('''for x,y in tuple((100,y) for y in xrange(100))+tuple((100-x,100) for x in xrange(1,100)):
+    a[16*y/x] if y<=x else 90-a[16*x/y] if y else 0
+''','''import math
+a = tuple((180*math.atan((x+.5)/16)/math.pi for x in xrange(16)))''').timeit(1000)
+0.13521099090576172
+### It takes <0.14 ms to calculate atan with an array...
+
+timeit.Timer('''for x,y in tuple((100,y) for y in xrange(100))+tuple((100-x,100) for x in xrange(1,100)):
+    int(180*math.atan2(y,x)/pi)
+''','''import math
+a = tuple((180*math.atan(float(x)/1000)/math.pi for x in xrange(101)))
+atan2, pi = math.atan2, math.pi''').timeit(1000)
+0.29992198944091797
+### It takes ~0.30 ms to calculate it with atan2()
+
+## For 8 directions, they would be 0, 45, 90, etc, with borders in 22.5, 67.5, 112.5, etc.
+for x,y in tuple((5,y) for y in xrange(-4,6))+tuple((x,5) for x in xrange(4,-6,-1))+tuple((-5,y) for y in xrange(4,-6,-1))+tuple((x,-5) for x in xrange(-4,5)):
+    fat = facing8(x,y)*45
+    at = 180*math.atan2(x,-y)/math.pi
+    if at < 0: at += 360
+    D = abs(fat-at)
+    if D > 180: D = 360-D
+    print "(%2d,%2d):"%(x,y),"%5.1f ~= %5.1f"%(fat,at),"D=%.1f"%D
+
+( 5,-4):  45.0 ~=  51.3 D=6.3
+( 5,-3):  45.0 ~=  59.0 D=14.0
+( 5,-2):  90.0 ~=  68.2 D=21.8
+( 5,-1):  90.0 ~=  78.7 D=11.3
+( 5, 0):  90.0 ~=  90.0 D=0.0
+( 5, 1):  90.0 ~= 101.3 D=11.3
+( 5, 2):  90.0 ~= 111.8 D=21.8
+( 5, 3):  90.0 ~= 121.0 D=31.0
+( 5, 4):  90.0 ~= 128.7 D=38.7
+( 5, 5):  90.0 ~= 135.0 D=45.0
+( 4, 5):  90.0 ~= 141.3 D=51.3
+( 3, 5):  90.0 ~= 149.0 D=59.0
+( 2, 5):  90.0 ~= 158.2 D=68.2
+( 1, 5): 180.0 ~= 168.7 D=11.3
+( 0, 5): 180.0 ~= 180.0 D=0.0
+(-1, 5): 180.0 ~= 191.3 D=11.3
+(-2, 5): 180.0 ~= 201.8 D=21.8
+(-3, 5): 225.0 ~= 211.0 D=14.0
+(-4, 5): 225.0 ~= 218.7 D=6.3
+(-5, 5): 225.0 ~= 225.0 D=0.0
+(-5, 4): 225.0 ~= 231.3 D=6.3
+(-5, 3): 225.0 ~= 239.0 D=14.0
+(-5, 2): 270.0 ~= 248.2 D=21.8
+(-5, 1): 270.0 ~= 258.7 D=11.3
+(-5, 0): 270.0 ~= 270.0 D=0.0
+(-5,-1): 270.0 ~= 281.3 D=11.3
+(-5,-2): 270.0 ~= 291.8 D=21.8
+(-5,-3): 315.0 ~= 301.0 D=14.0
+(-5,-4): 315.0 ~= 308.7 D=6.3
+(-5,-5): 315.0 ~= 315.0 D=0.0
+(-4,-5): 315.0 ~= 321.3 D=6.3
+(-3,-5): 315.0 ~= 329.0 D=14.0
+(-2,-5):   0.0 ~= 338.2 D=21.8
+(-1,-5):   0.0 ~= 348.7 D=11.3
+( 0,-5):   0.0 ~=   0.0 D=0.0
+( 1,-5):   0.0 ~=  11.3 D=11.3
+( 2,-5):   0.0 ~=  21.8 D=21.8
+( 3,-5):  45.0 ~=  31.0 D=14.0
+( 4,-5):  45.0 ~=  38.7 D=6.3
+
+timeit.Timer('''for x,y in tuple((100,y) for y in xrange(100))+tuple((100-x,100) for x in xrange(1,100)):
+    facing8(x,y)
+''','''def facing8(dx,dy):
+    if dx >= 0:
+    	if dy >= 0:
+    	    if 2*dx >= 5*dy: # tan(pi/8) ~= 0.41 ~ y = 0.4*x ~ 5y=2x
+    		return 2
+    	    elif 2*dy >= 5*dx:
+    		return 4
+    	    else:
+    		return 3
+    	else: # x>0, y<0
+    	    if 2*dx >= -5*dy:
+    		return 2
+    	    elif -2*dy >= 5*dx:
+    		return 0
+    	    else:
+    		return 1
+    else:
+    	if dy >= 0:
+    	    if -2*dx >= 5*dy:
+    		return 6
+    	    elif 2*dy >= -5*dx:
+    		return 4
+    	    else:
+    		return 5
+    	else:
+    	    if -2*dx >= -5*dy:
+    		return 6
+    	    elif -2*dy >= -5*dx:
+    		return 0
+    	    else:
+    		return 7''').timeit(1000)
+0.20205402374267578
+timeit.Timer('''for x,y in tuple((100,y) for y in xrange(100))+tuple((100-x,100) for x in xrange(1,100)):
+    facing8(x,y)
+''','''def facing8(dx,dy):
+    if dx >= 0:
+    	if dy >= 0:
+    	    if dx > 2*dy: # tan(pi/8) ~= 0.41 ~ y = 0.4*x ~ 5y=2x
+    		return 2
+    	    elif dy > 2*dx:
+    		return 4
+    	    else:
+    		return 3
+    	else: # x>0, y<0
+    	    if dx > -2*dy:
+    		return 2
+    	    elif -dy > 2*dx:
+    		return 0
+    	    else:
+    		return 1
+    else:
+    	if dy >= 0:
+    	    if -dx > 2*dy:
+    		return 6
+    	    elif dy > -2*dx:
+    		return 4
+    	    else:
+    		return 5
+    	else:
+    	    if -dx > -2*dy:
+    		return 6
+    	    elif -dy > -2*dx:
+    		return 0
+    	    else:
+    		return 7''').timeit(1000)
+0.17270112037658691
+### This is a good-enough approximation for 8 faces :P

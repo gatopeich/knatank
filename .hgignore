@@ -1,0 +1,14 @@
+syntax: glob
+.*
+*.7z
+*.o
+*.S
+*.so
+*.so.*
+*.ko
+*.bz2
+*.gz
+*.tar
+*.tar.*
+*.pyo
+*.pyc
