@@ -18,7 +18,7 @@ def post_to_review():
 
     args = '-r ' + get_reviewers_email() + ' --base_url . --rev .^ --send_mail --private'
 
-    proc = subprocess.Popen('hg identify', shell=True, stdout=subprocess.PIPE)
+    proc = subprocess.Popen('hg identify -i -b', shell=True, stdout=subprocess.PIPE)
 
     output = proc.communicate()
     retval = proc.returncode
