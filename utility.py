@@ -33,10 +33,12 @@ def load_multiimage(filename, multi=1, tint=False):
     return [image.subsurface(Rect(0,h*i,w,h)) for i in xrange(multi)]
 
 def load_sound(filename):
-    class NoneSound:
-        def play(self): pass
+    class Silence:
+        def play(self,loops=None): pass
+        def set_volume(self,volume=None): pass
+        def stop(self): pass
     if not pygame.mixer:
-        return NoneSound()
+        return Silence()
     try:
         sound = pygame.mixer.Sound(filename)
     except pygame.error, message:
@@ -50,3 +52,5 @@ class XY(tuple):
     def __sub__(self, other): return XY(self[0]-other[0], self[1]-other[1])
     def __mul__(self, scalar): return XY(xy[0]*scalar, xy[1]*scalar)
     def __div__(self, other): return XY(xy[0]*scalar, xy[1]/scalar)
+
+def int2(a,b): return (int(a),int(b))
