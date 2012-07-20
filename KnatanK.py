@@ -47,6 +47,7 @@ GREEN = pygame.Color('green')
 BLUE = pygame.Color('blue')
 YELLOW = pygame.Color('yellow')
 PINK = pygame.Color('pink')
+TANK_COLORS = (BLUE, RED, GREEN, YELLOW, PINK, GREY)
 
 # Eight directions: N, NE, E, SE, S, SW, W, NW
 directions = ((0.0, -2.8), (2.0, -2.0), (2.8, 0.0), (2.0, 2.0), (0.0, 2.8), (-2.0, 2.0), (-2.8, 0.0), (-2.0, -2.0))
@@ -130,7 +131,7 @@ class Tank(Physical):
         self.turrets = load_multiimage('tank_turret.png', 8, color)
         self.sx, self.sy = self.bodies[0].get_size()
         self.color = color
-        self.heading = 0
+        self.heading = 2 # SE
         self.targetx, self.targety = None, None
         self.sound = None
         self.trail = tuple(Trail(self.color, x, y) for i in xrange(7))
@@ -259,7 +260,6 @@ def Game():
     WallS = Wall(-100, FIELD_HEIGHT-10, FIELD_WIDTH+200, 110)
     WallW = Wall(-100, 11, 110, FIELD_HEIGHT-22)
 
-    #~ background = SCREEN.copy()
     tile = load_image('ground.png')
     tile_width, tile_height = tile.get_size()
 
@@ -296,19 +296,19 @@ def Game():
 
 def StartUp():
     pygame.init()
-    pygame.mixer.init()
-    global SCREEN
-    SCREEN = pygame.display.set_mode((640, 480))
+    pygame.mixer.init(frequency=11025, buffer=128) # TODO: fix sound delay
+
+    global SCREEN, SCREEN_WIDTH, SCREEN_HEIGHT, FIELD_WIDTH, FIELD_HEIGHT
     pygame.display.set_caption("KnatanK")
-    global SCREEN_WIDTH, SCREEN_HEIGHT, FIELD_WIDTH, FIELD_HEIGHT
+    SCREEN = pygame.display.set_mode((640, 480))
     SCREEN_WIDTH, SCREEN_HEIGHT = SCREEN.get_size()
     FIELD_WIDTH, FIELD_HEIGHT = SCREEN_WIDTH, SCREEN_HEIGHT*2
 
-    titlefont = pygame.font.Font(None, 100)
-    titlefont.set_bold(True)
-    titlefont.set_italic(True)
-    #SCREEN.fill(YELLOW, Rect(100,100,440,280))
-    SCREEN.blit(titlefont.render('KnatanK', True, RED, YELLOW), (110, 110))
+    global FONT_TITLE, FONT_MENU
+    FONT_TITLE = pygame.font.Font(None, 100)
+    FONT_TITLE.set_bold(True)
+    FONT_TITLE.set_italic(True)
+    FONT_MENU = pygame.font.Font(None, 30)
 
     # Sounds:
     global SOUND_WALK, SOUND_TURN, SOUND_SHOT, SOUND_EXPLOSION
@@ -321,20 +321,52 @@ def StartUp():
     SOUND_EXPLOSION = load_sound('explosion.wav')
     SOUND_EXPLOSION.set_volume(.2)
 
-    Game()
+    global TANKS
+    TANKS = tuple(Tank(c) for c in TANK_COLORS)
 
-    players_connected = 0
+    # Start network connections
     import socket
-
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('', PORT_INIT))
-    sock.setblocking(0)
+    sock.settimeout(0.0)
+    #sock.connect(('<broadcast>', PORT_INIT))
+    #sock.connect(('127.0.0.1', PORT_INIT)) # TODO: Broadcast!
+
+    players = []
+    import uuid
+    my_id = uuid.uuid4().hex
+    info = "Waiting for players..."
 
     while True:
-        menufont = pygame.font.Font(None, 30)
-        SCREEN.blit(titlefont.render(str(players_connected)
-            + ' players connected', True, BLACK, YELLOW), (110, 210))
+        try:
+            #sock.send(my_id)
+            sock.sendto(my_id, ('<broadcast>', PORT_INIT))
+            player, address = sock.recvfrom(100)
+            if player not in players:
+                bisect.insort(players, player)
+                info = str(len(players)) + ' players connected.'
+                print "New player from", address, ":", player, ".", info
+        except socket.timeout: print "Timeout..."
+
+        SCREEN.fill(YELLOW, Rect(40, 40, SCREEN_WIDTH-80, SCREEN_HEIGHT-80))
+        xy = XY(50, 50)
+        SCREEN.blit(FONT_TITLE.render('KnatanK', True, RED, YELLOW), xy)
+        xy = xy + XY(0, FONT_TITLE.get_linesize())
+        SCREEN.blit(FONT_MENU.render(info, True, BLACK, YELLOW), xy)
+        xy = xy + XY(0, FONT_MENU.get_linesize())
+        for i in xrange(len(players)):
+            tank = TANKS[i]
+            SCREEN.blit(tank.bodies[3], xy)
+            SCREEN.blit(tank.turrets[3], xy)
+            SCREEN.blit(FONT_MENU.render("Player " + str(i+1)
+                + (" (you!)" if players[i] == my_id else "")
+                , True, BLACK, YELLOW)
+                , xy + XY(tank.sx+10, (tank.sy-FONT_MENU.get_height())/2))
+            xy += XY(0, tank.sy)
+        pygame.display.flip()
+        time.sleep(1)
 
     # Mute:
     #pygame.mixer = False
