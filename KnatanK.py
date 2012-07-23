@@ -24,14 +24,17 @@
 # FIX Multiple collision -> ValueError: All.remove(x): x not in All.
 
 import pygame, time, math, bisect
-from pygame import draw, Rect
+from pygame import draw, event, Rect
 from utility import *
 
 ### GLOBALS
 
 # Networking
-PORT_INIT = 55555
+PORT_LOBBY = 55555
 PORT_GAME = 55556
+BROADCAST = '<broadcast>'
+BROADCAST_LOBBY = (BROADCAST, PORT_LOBBY)
+BROADCAST_GAME = (BROADCAST, PORT_GAME)
 
 # Dimensions
 global SCREEN_WIDTH, SCREEN_HEIGHT, FIELD_WIDTH, FIELD_HEIGHT
@@ -47,7 +50,8 @@ GREEN = pygame.Color('green')
 BLUE = pygame.Color('blue')
 YELLOW = pygame.Color('yellow')
 PINK = pygame.Color('pink')
-TANK_COLORS = (BLUE, RED, GREEN, YELLOW, PINK, GREY)
+BROWN = pygame.Color('brown')
+TANK_COLORS = (BLUE, RED, GREEN, YELLOW, PINK, BROWN, GREY)
 
 # Eight directions: N, NE, E, SE, S, SW, W, NW
 directions = ((0.0, -2.8), (2.0, -2.0), (2.8, 0.0), (2.0, 2.0), (0.0, 2.8), (-2.0, 2.0), (-2.8, 0.0), (-2.0, -2.0))
@@ -105,6 +109,7 @@ class Physical(Sprite):
 
     @staticmethod
     def collideall():
+        # TODO: use Rect.collidelist()!!!
         objects = tuple(o for o in Physical.All)
         for o1 in objects:
             for o2 in objects:
@@ -119,29 +124,51 @@ class Physical(Sprite):
 class Wall(Physical):
     def __init__(self, left, top, width, height):
         self.y = top+height
-        self.screenrect = Rect(left, top/2, width, height/2)
         Physical.__init__(self, Rect(left, top, width, height))
+        self.top = RED, Rect(left, top/2-BULLET_HEIGHT, width, height/2)
+        self.side = BROWN, Rect(left, (top+height)/2-BULLET_HEIGHT, width
+            , BULLET_HEIGHT)
     def draw(self):
-        draw.rect(SCREEN, BLACK, self.screenrect, 1)
+        FILL(*self.top)
+        FILL(*self.side)
+
+class LocalControl:
+    def __init__(self, tank, keymap = (pygame.K_UP, pygame.K_RIGHT
+            , pygame.K_DOWN, pygame.K_LEFT)):
+        self.tank = tank
+        self.keymap = keymap
+    def update(self):
+        """ Must be called every tick."""
+        pressed = pygame.key.get_pressed()
+        uprightdownleft = tuple(pressed[key] for key in self.keymap)
+        if sum(uprightdownleft):
+            up, right, down, left = uprightdownleft
+            self.tank.headto = facing8(right-left, down-up)
+        else:
+            self.tank.headto = None
+        self.tank.targetx, self.tank.targety = pygame.mouse.get_pos()
+        self.tank.targety += BULLET_HEIGHT
+        self.tank.targety *= 2 # Perspective
+        self.tank.fire = pygame.mouse.get_pressed()[0]
 
 class Tank(Physical):
-    def __init__(self, color=BLUE, x=100, y=100):
+    def __init__(self, color, x, y):
         self.x, self.y = x, y
         self.bodies = load_multiimage('tank_body.png', 8, color)
         self.turrets = load_multiimage('tank_turret.png', 8, color)
         self.sx, self.sy = self.bodies[0].get_size()
         self.color = color
         self.heading = 2 # SE
-        self.targetx, self.targety = None, None
         self.sound = None
         self.trail = tuple(Trail(self.color, x, y) for i in xrange(7))
         self.readyamo = 5
         self.reloading = 0
-        self.controlkeys = pygame.K_UP, pygame.K_RIGHT, pygame.K_DOWN, pygame.K_LEFT
         self.facing = None
         self.bullet = None
         w = self.sx
         Physical.__init__(self, Rect(x-w/2, y-w/2, w, w))
+        # Controls:
+        self.headto, self.fire, self.targetx, self.targety = None, 0, x, y
 
     def noise(self, sound):
         if self.sound != sound:
@@ -152,24 +179,14 @@ class Tank(Physical):
                 self.sound.play(-1)
 
     def update(self):
-        """ Must be called every tick."""
-        pressed = pygame.key.get_pressed()
-        #uprightdownleft = map(pressed.__getitem__, self.controlkeys)
-        uprightdownleft = tuple(pressed[key] for key in self.controlkeys)
-        if sum(uprightdownleft):
-            up, right, down, left = uprightdownleft
-            headto = facing8(right-left, down-up)
-        else:
-            headto = None
-
-        if headto == self.heading:
+        if self.headto == self.heading:
             self.noise(SOUND_WALK)
-            self.x += directions[headto][0]
-            self.y += directions[headto][1]
+            self.x += directions[self.heading][0]
+            self.y += directions[self.heading][1]
             self.bounds.center = self.x, self.y
-        elif headto != None:
+        elif self.headto != None:
             self.noise(SOUND_TURN)
-            if (headto+8-self.heading)&7 <= 4:
+            if (self.headto+8-self.heading)&7 <= 4:
                 self.heading += 1
             else:
                 self.heading -= 1
@@ -177,9 +194,6 @@ class Tank(Physical):
         else:
             self.noise(None)
 
-        self.targetx, self.targety = pygame.mouse.get_pos()
-        self.targety += BULLET_HEIGHT
-        self.targety *= 2 # Perspective
         dx = self.targetx - self.x
         dy = self.targety - self.y
         self.facing = facing8(dx, dy)
@@ -193,7 +207,7 @@ class Tank(Physical):
                 self.readyamo += 1
                 self.reloading = 10
 
-        if self.readyamo and pygame.mouse.get_pressed()[0]:
+        if self.readyamo and self.fire:
             self.readyamo -= 1
             self.reloading = 10
             distance = math.hypot(dx, dy)
@@ -204,8 +218,8 @@ class Tank(Physical):
         xy = self.x-self.sx/2, (self.y-self.sy-TANK_HEIGHT)/2
         draw.line(SCREEN, BLACK, (self.x-30, self.y/2), (self.x+30, self.y/2))
         draw.line(SCREEN, BLACK, (self.x, self.y/2-20), (self.x, self.y/2+20))
-        SCREEN.blit(self.bodies[self.heading], xy)
-        SCREEN.blit(self.turrets[self.facing], xy)
+        BLIT(self.bodies[self.heading], xy)
+        BLIT(self.turrets[self.facing], xy)
 
 class Trail(Sprite):
     def __init__(self, color, x, y):
@@ -231,34 +245,34 @@ class Explosion(Sprite):
 class Bullet(Physical):
     def __init__(self, x, y, vx, vy):
         SOUND_SHOT.play()
-        # Some fixed point magic:
-        self.fx, self.fy = ints(256*x, 256*y)
-        self.y = int(self.fy>>8)
-        self.vx, self.vy = ints(256*vx, 256*vy)
-        self.bounces = 1
+        # 8-bit fixed point:
+        self.x, self.y, self.vx, self.vy = x, y, vx, vy
+        # TODO: self.bounces = 1
         Physical.__init__(self, Rect(x-1, y-1, 3, 3))
     def update(self):
-        self.fx += self.vx
-        self.fy += self.vy
-        self.y = int(self.fy>>8)
-        self.bounds.center = int(self.fx>>8), self.y
+        self.x += self.vx
+        self.y += self.vy
+        self.bounds.center = self.x, self.y
     def collision(self, other):
         Explosion(10, self.bounds.center)
         self.dissapear()
     def draw(self):
-        draw.circle(SCREEN, WHITE, ((self.fx-self.vx/3)>>8, ((self.fy-self.vy/3)>>9)-10), 2)
-        draw.circle(SCREEN, WHITE, (self.fx>>8, (self.fy>>9)-BULLET_HEIGHT), 2)
-        draw.line(SCREEN, BLACK, ((self.fx>>8)-1, self.fy>>9), ((self.fx>>8)+1, self.fy>>9))
+        draw.circle(SCREEN, WHITE
+            , ints(self.x-self.vx/3, (self.y-self.vy/3)/2-BULLET_HEIGHT), 3)
+        draw.circle(SCREEN, WHITE, ints(self.x, self.y/2-BULLET_HEIGHT), 3)
+        draw.line(SCREEN, BLACK, (self.x-1, self.y/2), (self.x+1, self.y/2))
 
-def Game():
-    tanks = ( Tank(BLUE, FIELD_WIDTH/3, FIELD_HEIGHT/3),
-              Tank(PINK, FIELD_WIDTH*2/3, FIELD_HEIGHT/3),
-              Tank(RED, FIELD_WIDTH/3, FIELD_HEIGHT*2/3),
-              Tank(GREEN, FIELD_WIDTH*2/3, FIELD_HEIGHT*2/3) )
-    WallN = Wall(-100, -100, FIELD_WIDTH+200, 110)
-    WallE = Wall(FIELD_WIDTH-10, 11, 110, FIELD_HEIGHT-22)
-    WallS = Wall(-100, FIELD_HEIGHT-10, FIELD_WIDTH+200, 110)
-    WallW = Wall(-100, 11, 110, FIELD_HEIGHT-22)
+def DrawBorders():
+    margin = 0
+    h = 20
+    v = (20+BULLET_HEIGHT)*2
+    Wall(-margin,        -margin, FIELD_WIDTH+2*margin, margin+v)
+    Wall(-margin, FIELD_HEIGHT-v, FIELD_WIDTH+2*margin, v+margin)
+    Wall(-margin,        -margin, margin+h, FIELD_HEIGHT+2*margin)
+    Wall(FIELD_WIDTH-h,  -margin, h+margin, FIELD_HEIGHT+2*margin)
+
+def Game(tanks):
+    DrawBorders()
 
     tile = load_image('ground.png')
     tile_width, tile_height = tile.get_size()
@@ -272,21 +286,22 @@ def Game():
 
     clock = pygame.time.Clock()
     infoline = ''
-    while True:
+    infoxy = (10, SCREEN_HEIGHT - font.get_linesize())
+
+    event.set_allowed(pygame.QUIT)
+    while not event.peek(pygame.QUIT):
+        LOCAL_CONTROL.update()
+
         clock.tick(10) # Ticks per second
         cycletimer = time.time() # pygame.time.get_ticks()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return
 
         Sprite.updateall()
         Physical.collideall()
 
-        SCREEN.blit(background, (0, 0))
+        BLIT(background, (0, 0))
         Sprite.drawall()
 
-        SCREEN.blit(font.render(infoline, True, WHITE), (7, 7))
+        BLIT(font.render(infoline, False, YELLOW), infoxy)
         pygame.display.flip()
 
         infoline = 'FPS: %0.1f' % (clock.get_fps())
@@ -296,11 +311,15 @@ def Game():
 
 def StartUp():
     pygame.init()
-    pygame.mixer.init(frequency=11025, buffer=128) # TODO: fix sound delay
+    #pygame.mixer.init(frequency=11025, buffer=128) # TODO: fix sound delay
 
-    global SCREEN, SCREEN_WIDTH, SCREEN_HEIGHT, FIELD_WIDTH, FIELD_HEIGHT
+    global SCREEN, BLIT, FILL
     pygame.display.set_caption("KnatanK")
     SCREEN = pygame.display.set_mode((640, 480))
+    BLIT = SCREEN.blit
+    FILL = SCREEN.fill
+
+    global SCREEN_WIDTH, SCREEN_HEIGHT, FIELD_WIDTH, FIELD_HEIGHT
     SCREEN_WIDTH, SCREEN_HEIGHT = SCREEN.get_size()
     FIELD_WIDTH, FIELD_HEIGHT = SCREEN_WIDTH, SCREEN_HEIGHT*2
 
@@ -322,27 +341,49 @@ def StartUp():
     SOUND_EXPLOSION.set_volume(.2)
 
     global TANKS
-    TANKS = tuple(Tank(c) for c in TANK_COLORS)
+    TANKS = ( Tank(BLUE, FIELD_WIDTH/4, FIELD_HEIGHT/4),
+              Tank(RED, FIELD_WIDTH*3/4, FIELD_HEIGHT*3/4),
+              Tank(GREEN, FIELD_WIDTH*3/4, FIELD_HEIGHT/4),
+              Tank(YELLOW, FIELD_WIDTH/4, FIELD_HEIGHT*3/4),
+              Tank(PINK, FIELD_WIDTH/2, FIELD_HEIGHT/2) )
 
     # Start network connections
     import socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('', PORT_INIT))
+    sock.bind(('', PORT_LOBBY))
     sock.settimeout(0.0)
-    #sock.connect(('<broadcast>', PORT_INIT))
-    #sock.connect(('127.0.0.1', PORT_INIT)) # TODO: Broadcast!
+    #sock.connect(BROADCAST_LOBBY) # TODO: connect to broadcast port?!
 
     players = []
     import uuid
     my_id = uuid.uuid4().hex
     info = "Waiting for players..."
 
-    while True:
+    title = FONT_TITLE.render('KnatanK', True, RED, YELLOW)
+    start_button = FONT_TITLE.render(' Start! ', True, WHITE, RED)
+    start_button = ( start_button
+        , Rect(60, SCREEN_HEIGHT-60-FONT_TITLE.get_height()
+            , *start_button.get_size()))
+
+    event.set_allowed((pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN, pygame.QUIT))
+    event.clear()
+    ready_to_start = False
+    while not ready_to_start:
+        for e in event.get():
+            if((e.type == pygame.MOUSEBUTTONDOWN
+                 and start_button[1].collidepoint(e.pos))
+            or (e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE) ):
+                ready_to_start = True
+            elif( e.type == pygame.QUIT
+            or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE) ):
+                print "User quit."
+                pygame.quit()
+                return
+
         try:
-            #sock.send(my_id)
-            sock.sendto(my_id, ('<broadcast>', PORT_INIT))
+            sock.sendto(my_id, BROADCAST_LOBBY) #sock.send(my_id)
             player, address = sock.recvfrom(100)
             if player not in players:
                 bisect.insort(players, player)
@@ -350,27 +391,34 @@ def StartUp():
                 print "New player from", address, ":", player, ".", info
         except socket.timeout: print "Timeout..."
 
-        SCREEN.fill(YELLOW, Rect(40, 40, SCREEN_WIDTH-80, SCREEN_HEIGHT-80))
+        FILL(YELLOW, Rect(40, 40, SCREEN_WIDTH-80, SCREEN_HEIGHT-80))
         xy = XY(50, 50)
-        SCREEN.blit(FONT_TITLE.render('KnatanK', True, RED, YELLOW), xy)
+        BLIT(title, xy)
         xy = xy + XY(0, FONT_TITLE.get_linesize())
-        SCREEN.blit(FONT_MENU.render(info, True, BLACK, YELLOW), xy)
+        BLIT(FONT_MENU.render(info, True, BLACK, YELLOW), xy)
         xy = xy + XY(0, FONT_MENU.get_linesize())
         for i in xrange(len(players)):
             tank = TANKS[i]
-            SCREEN.blit(tank.bodies[3], xy)
-            SCREEN.blit(tank.turrets[3], xy)
-            SCREEN.blit(FONT_MENU.render("Player " + str(i+1)
+            BLIT(tank.bodies[3], xy)
+            BLIT(tank.turrets[3], xy)
+            BLIT(FONT_MENU.render("Player " + str(i+1)
                 + (" (you!)" if players[i] == my_id else "")
                 , True, BLACK, YELLOW)
                 , xy + XY(tank.sx+10, (tank.sy-FONT_MENU.get_height())/2))
             xy += XY(0, tank.sy)
+        BLIT(*start_button)
+
         pygame.display.flip()
         time.sleep(1)
 
-    # Mute:
-    #pygame.mixer = False
-    Game()
+    for i in xrange(len(players)):
+        if players[i] == my_id:
+            global LOCAL_CONTROL
+            LOCAL_CONTROL = LocalControl(TANKS[i])
+
+    print "Starting game..."
+    Game(TANKS[:len(players)])
+    print "Game Over."
 
 if __name__ == '__main__':
     StartUp()
