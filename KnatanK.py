@@ -50,8 +50,9 @@ GREEN = pygame.Color('green')
 BLUE = pygame.Color('blue')
 YELLOW = pygame.Color('yellow')
 PINK = pygame.Color('pink')
+ORANGE = pygame.Color('orange')
 BROWN = pygame.Color('brown')
-TANK_COLORS = (BLUE, RED, GREEN, YELLOW, PINK, BROWN, GREY)
+TANK_COLORS = (BLUE, RED, GREEN, YELLOW, PINK, ORANGE, BROWN, GREY)
 
 # Eight directions: N, NE, E, SE, S, SW, W, NW
 directions = ((0.0, -2.8), (2.0, -2.0), (2.8, 0.0), (2.0, 2.0), (0.0, 2.8), (-2.0, 2.0), (-2.8, 0.0), (-2.0, -2.0))
@@ -69,8 +70,8 @@ def facing8(dx, dy):
 class Sprite:
     All = []
 
-    def __init__(self):
-        self.y = self.y
+    def __init__(self, y):
+        self.y = y
         bisect.insort(Sprite.All, self)
     def __lt__(self, other):
         return self.y < other.y
@@ -81,7 +82,7 @@ class Sprite:
     def update(self): pass
     def draw(self): pass
     def __repr__(self):
-        return self.__class__.__name__
+        return self.__class__.__name__+' at Z='+str(self.z)
 
     @staticmethod
     def updateall():
@@ -94,43 +95,21 @@ class Sprite:
         for sprite in Sprite.All:
             sprite.draw()
 
-class Physical(Sprite):
+class Wall(Sprite):
     All = []
-    def __init__(self, bounds):
-        self.bounds = bounds
-        bisect.insort(Physical.All, self)
-        Sprite.__init__(self)
-    def dissapear(self):
-        try: Physical.All.remove(self)
-        except ValueError: pass # Already removed
-        Sprite.dissapear(self)
-
-    def collision(self, other): pass
-
-    @staticmethod
-    def collideall():
-        # TODO: use Rect.collidelist()!!!
-        objects = tuple(o for o in Physical.All)
-        for o1 in objects:
-            for o2 in objects:
-#                print o1,"vs",o2
-#                print o1.bounds,"vs",o2.bounds
-                if o1 != o2 and o1.bounds.colliderect(o2.bounds):
-                    #~ print o1, "hit", o2
-                    o1.collision(o2)
-    def __repr__(self):
-        return self.__class__.__name__+' at '+str(self.bounds.center)
-
-class Wall(Physical):
     def __init__(self, left, top, width, height):
-        self.y = top+height
-        Physical.__init__(self, Rect(left, top, width, height))
-        self.top = RED, Rect(left, top/2-BULLET_HEIGHT, width, height/2)
-        self.side = BROWN, Rect(left, (top+height)/2-BULLET_HEIGHT, width
+        Sprite.__init__(self, top+height)
+        Wall.All.append(self)
+        self.rect = Rect(left, top, width, height)
+        self.filltop = ORANGE, Rect(left, top/2-BULLET_HEIGHT, width, height/2)
+        self.fillside = BROWN, Rect(left, (top+height)/2-BULLET_HEIGHT, width
             , BULLET_HEIGHT)
     def draw(self):
-        FILL(*self.top)
-        FILL(*self.side)
+        FILL(*self.filltop)
+        FILL(*self.fillside)
+    def dissapear(self):
+        Sprite.dissapear(self)
+        Wall.All.remove(self)
 
 class LocalControl:
     def __init__(self, tank, keymap = (pygame.K_UP, pygame.K_RIGHT
@@ -151,12 +130,17 @@ class LocalControl:
         self.tank.targety *= 2 # Perspective
         self.tank.fire = pygame.mouse.get_pressed()[0]
 
-class Tank(Physical):
+class Tank(Sprite):
+    All = []
     def __init__(self, color, x, y):
-        self.x, self.y = x, y
+        Sprite.__init__(self, y)
+        Tank.All.append(self)
         self.bodies = load_multiimage('tank_body.png', 8, color)
         self.turrets = load_multiimage('tank_turret.png', 8, color)
         self.sx, self.sy = self.bodies[0].get_size()
+        w = self.sx
+        self.rect = Rect(x-w/2, y-w/2, w, w)
+        self.x, self.y = x, y
         self.color = color
         self.heading = 2 # SE
         self.sound = None
@@ -164,11 +148,13 @@ class Tank(Physical):
         self.readyamo = 5
         self.reloading = 0
         self.facing = None
-        self.bullet = None
-        w = self.sx
-        Physical.__init__(self, Rect(x-w/2, y-w/2, w, w))
         # Controls:
         self.headto, self.fire, self.targetx, self.targety = None, 0, x, y
+
+    def dissapear(self):
+        Sprite.dissapear(self)
+        Tank.All.remove(self)
+        for t in self.trail: t.dissapear()
 
     def noise(self, sound):
         if self.sound != sound:
@@ -181,9 +167,14 @@ class Tank(Physical):
     def update(self):
         if self.headto == self.heading:
             self.noise(SOUND_WALK)
-            self.x += directions[self.heading][0]
-            self.y += directions[self.heading][1]
-            self.bounds.center = self.x, self.y
+            newxy = ( self.x + directions[self.heading][0]
+                    , self.y + directions[self.heading][1] )
+            self.rect.center = newxy
+            # Check for obstacles:
+            if self.rect.collidelist(Wall.All) != -1 or 1<len(self.rect.collidelistall(Tank.All)):
+                self.rect.center = self.x, self.y
+            else:
+                self.x, self.y = newxy
         elif self.headto != None:
             self.noise(SOUND_TURN)
             if (self.headto+8-self.heading)&7 <= 4:
@@ -197,64 +188,77 @@ class Tank(Physical):
         dx = self.targetx - self.x
         dy = self.targety - self.y
         self.facing = facing8(dx, dy)
-        for i in xrange(1, 8):
-            self.trail[i-1].x = (i*self.targetx+(8-i)*self.x)/8
-            self.trail[i-1].y = (i*self.targety+(8-i)*self.y)/8
+        for i in xrange(7):
+            self.trail[i].x = ((i+1)*self.targetx+(7-i)*self.x)/8
+            self.trail[i].y = ((i+1)*self.targety+(7-i)*self.y)/8
 
+        # Reload one bullet every 10 ticks:
         if self.reloading:
             self.reloading -= 1
             if not self.reloading:
                 self.readyamo += 1
-                self.reloading = 10
+                if self.readyamo < 5:
+                    self.reloading = 10
 
         if self.readyamo and self.fire:
             self.readyamo -= 1
             self.reloading = 10
             distance = math.hypot(dx, dy)
             vx, vy = 10.0*dx/distance, 10.0*dy/distance
-            self.bullet = Bullet(self.x+4*vx, self.y+4*vy, vx, vy)
+            Bullet(self.x+4*vx, self.y+4*vy, vx, vy)
 
     def draw(self):
         xy = self.x-self.sx/2, (self.y-self.sy-TANK_HEIGHT)/2
-        draw.line(SCREEN, BLACK, (self.x-30, self.y/2), (self.x+30, self.y/2))
-        draw.line(SCREEN, BLACK, (self.x, self.y/2-20), (self.x, self.y/2+20))
+        #draw.line(SCREEN, BLACK, (self.x-30, self.y/2), (self.x+30, self.y/2))
+        #draw.line(SCREEN, BLACK, (self.x, self.y/2-20), (self.x, self.y/2+20))
         BLIT(self.bodies[self.heading], xy)
         BLIT(self.turrets[self.facing], xy)
+
+    def explode(self):
+        Explosion(self.sx, self.rect.center)
+        self.dissapear()
 
 class Trail(Sprite):
     def __init__(self, color, x, y):
         self.color = color
         self.x, self.y = x, y
-        Sprite.__init__(self)
+        Sprite.__init__(self, y)
     def draw(self):
-        draw.circle(SCREEN, self.color, ints(self.x, self.y/2-BULLET_HEIGHT) , 3, 1)
+        draw.circle(SCREEN, self.color, ints(self.x, self.y/2-BULLET_HEIGHT), 3, 1)
         draw.line(SCREEN, BLACK, (self.x-1, self.y/2), (self.x+1, self.y/2))
 
 class Explosion(Sprite):
-    def __init__(self, size, center):
+    def __init__(self, size, xy):
         SOUND_EXPLOSION.play()
         self.size = size
-        self.x, self.y = center
-        Sprite.__init__(self)
+        Sprite.__init__(self, xy[1])
+        self.xy = ints(xy[0],xy[1]/2-BULLET_HEIGHT)
     def draw(self):
-        draw.circle(SCREEN, RED, ints(self.x, self.y/2-BULLET_HEIGHT), self.size)
+        draw.circle(SCREEN, RED, self.xy, self.size)
         self.size -= 5
         if 2 > self.size:
             self.dissapear()
 
-class Bullet(Physical):
+class Bullet(Sprite):
     def __init__(self, x, y, vx, vy):
         SOUND_SHOT.play()
         # 8-bit fixed point:
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
         # TODO: self.bounces = 1
-        Physical.__init__(self, Rect(x-1, y-1, 3, 3))
+        self.rect = Rect(0,0,3,3)
+        Sprite.__init__(self, y)
     def update(self):
         self.x += self.vx
         self.y += self.vy
-        self.bounds.center = self.x, self.y
-    def collision(self, other):
-        Explosion(10, self.bounds.center)
+        self.rect.center = self.x, self.y
+        tankhit = self.rect.collidelist(Tank.All)
+        if tankhit >= 0:
+            Tank.All[tankhit].explode()
+            self.explode()
+        elif self.rect.collidelist(Wall.All) >= 0:
+            self.explode()
+    def explode(self):
+        Explosion(10, self.rect.center)
         self.dissapear()
     def draw(self):
         draw.circle(SCREEN, WHITE
@@ -296,7 +300,6 @@ def Game(tanks):
         cycletimer = time.time() # pygame.time.get_ticks()
 
         Sprite.updateall()
-        Physical.collideall()
 
         BLIT(background, (0, 0))
         Sprite.drawall()
