@@ -1,12 +1,17 @@
 #! /usr/bin/env python
 # coding=utf-8 *** KatanK by gatopeich 2010
+"""
+KnatanK (c) gatopeich 2011,2012
+All rights reserved until I find an adequate license
+
+Utility code
+"""
 
 import pygame
 from pygame import Rect
 
 def clip255(x): return (x if x >=0 else 0) if x < 256 else 255
 
-### Utility functions ###
 def load_image(filename, tint = False):
     try:
         image = pygame.image.load(filename)
