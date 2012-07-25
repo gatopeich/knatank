@@ -30,11 +30,9 @@ from utility import *
 ### GLOBALS
 
 # Networking
-PORT_LOBBY = 55555
-PORT_GAME = 55556
+PORT = 55555
 BROADCAST = '<broadcast>'
-BROADCAST_LOBBY = (BROADCAST, PORT_LOBBY)
-BROADCAST_GAME = (BROADCAST, PORT_GAME)
+BROADCAST_ADDRESS = (BROADCAST, PORT)
 
 # Dimensions
 global SCREEN_WIDTH, SCREEN_HEIGHT, FIELD_WIDTH, FIELD_HEIGHT
@@ -112,12 +110,12 @@ class Wall(Sprite):
         Wall.All.remove(self)
 
 class LocalControl:
-    def __init__(self, tank, keymap = (pygame.K_UP, pygame.K_RIGHT
+    def __init__(self, tn, tank, keymap = (pygame.K_UP, pygame.K_RIGHT
             , pygame.K_DOWN, pygame.K_LEFT)):
+        self.tn = tn
         self.tank = tank
         self.keymap = keymap
     def update(self):
-        """ Must be called every tick."""
         pressed = pygame.key.get_pressed()
         uprightdownleft = tuple(pressed[key] for key in self.keymap)
         if sum(uprightdownleft):
@@ -125,10 +123,43 @@ class LocalControl:
             self.tank.headto = facing8(right-left, down-up)
         else:
             self.tank.headto = None
+
         self.tank.targetx, self.tank.targety = pygame.mouse.get_pos()
         self.tank.targety += BULLET_HEIGHT
         self.tank.targety *= 2 # Perspective
         self.tank.fire = pygame.mouse.get_pressed()[0]
+
+        from pickle import dumps
+        packet = dumps((TURN, self.tn, self.tank.headto, self.tank.targetx
+            , self.tank.targety, self.tank.fire))
+#        print "=>",repr((TURN, self.tn, self.tank.headto, self.tank.targetx
+#            , self.tank.targety, self.tank.fire))
+        return packet
+
+class RemoteControl:
+    All = {}
+    Parsed = {}
+    def __init__(self, tn, tank):
+        RemoteControl.All[tn] = self
+        RemoteControl.Parsed[tn] = None
+        self.tank = tank
+    def update(self, headto, targetx, targety, fire):
+        self.tank.headto = headto
+        self.tank.targetx, self.tank.targety = targetx, targety
+        self.tank.fire = fire
+    @staticmethod
+    def parse(packet):
+        from pickle import loads
+        turn, tn, headto, targetx, targety, fire = loads(packet)
+#        print "<=", repr(loads(packet))
+        if LOCAL_CONTROL.tn==tn or TURN!=turn or RemoteControl.Parsed[tn]==turn:
+            return False
+        RemoteControl.All[tn].update(headto, targetx, targety, fire)
+        RemoteControl.Parsed[tn] = turn
+        for t in RemoteControl.Parsed.itervalues():
+            if t != TURN:
+                return False
+        return True # Done parsing
 
 class Tank(Sprite):
     All = []
@@ -139,7 +170,7 @@ class Tank(Sprite):
         self.turrets = load_multiimage('tank_turret.png', 8, color)
         self.sx, self.sy = self.bodies[0].get_size()
         w = self.sx
-        self.rect = Rect(x-w/2, y-w/2, w, w)
+        self.rect = Rect(x-w/2, y-w/2, w, w).inflate(-8,-8)
         self.x, self.y = x, y
         self.color = color
         self.heading = 2 # SE
@@ -292,12 +323,27 @@ def Game(tanks):
     infoline = ''
     infoxy = (10, SCREEN_HEIGHT - font.get_linesize())
 
+    global TURN
+    TURN = 0
+
     event.set_allowed(pygame.QUIT)
     while not event.peek(pygame.QUIT):
-        LOCAL_CONTROL.update()
-
+        TURN += 1
         clock.tick(10) # Ticks per second
         cycletimer = time.time() # pygame.time.get_ticks()
+
+        packet = LOCAL_CONTROL.update()
+        while True:
+            SOCKET.sendto(packet, BROADCAST_ADDRESS)
+            remote = SOCKET.recv(100)
+            if remote[0] == '(' and RemoteControl.parse(remote):
+                break
+            remote = SOCKET.recv(100)
+            if remote[0] == '(' and RemoteControl.parse(remote):
+                break
+            remote = SOCKET.recv(100)
+            if remote[0] == '(' and RemoteControl.parse(remote):
+                break
 
         Sprite.updateall()
 
@@ -312,7 +358,7 @@ def Game(tanks):
         dx, dy = tanks[0].targetx - tanks[0].x, tanks[0].targety - tanks[0].y
         infoline += ', dx=%d, dy=%d' %(dx, dy)
 
-def StartUp():
+def Lobby():
     pygame.init()
     #pygame.mixer.init(frequency=11025, buffer=128) # TODO: fix sound delay
 
@@ -352,12 +398,13 @@ def StartUp():
 
     # Start network connections
     import socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(('', PORT_LOBBY))
-    sock.settimeout(0.0)
-    #sock.connect(BROADCAST_LOBBY) # TODO: connect to broadcast port?!
+    global SOCKET
+    SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    SOCKET.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    SOCKET.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    SOCKET.bind(('', PORT))
+    #SOCKET.settimeout(0.010)
+    #SOCKET.connect(BROADCAST_ADDRESS) # TODO: connect to broadcast port?!
 
     players = []
     import uuid
@@ -379,6 +426,7 @@ def StartUp():
                  and start_button[1].collidepoint(e.pos))
             or (e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE) ):
                 ready_to_start = True
+                SOCKET.sendto('START', BROADCAST_ADDRESS)
             elif( e.type == pygame.QUIT
             or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE) ):
                 print "User quit."
@@ -386,12 +434,14 @@ def StartUp():
                 return
 
         try:
-            sock.sendto(my_id, BROADCAST_LOBBY) #sock.send(my_id)
-            player, address = sock.recvfrom(100)
-            if player not in players:
-                bisect.insort(players, player)
+            SOCKET.sendto(my_id, BROADCAST_ADDRESS) #SOCKET.send(my_id)
+            msg, address = SOCKET.recvfrom(100)
+            if msg == 'START':
+                break
+            if msg not in players:
+                bisect.insort(players, msg)
                 info = str(len(players)) + ' players connected.'
-                print "New player from", address, ":", player, ".", info
+                print "New player from", address, ":", msg, ".", info
         except socket.timeout: print "Timeout..."
 
         FILL(YELLOW, Rect(40, 40, SCREEN_WIDTH-80, SCREEN_HEIGHT-80))
@@ -414,14 +464,18 @@ def StartUp():
         pygame.display.flip()
         time.sleep(1)
 
-    for i in xrange(len(players)):
+    global NPLAYERS
+    NPLAYERS = len(players)
+    for i in xrange(NPLAYERS):
         if players[i] == my_id:
             global LOCAL_CONTROL
-            LOCAL_CONTROL = LocalControl(TANKS[i])
+            LOCAL_CONTROL = LocalControl(i, TANKS[i])
+        else:
+            RemoteControl(i, TANKS[i])
 
     print "Starting game..."
     Game(TANKS[:len(players)])
     print "Game Over."
 
 if __name__ == '__main__':
-    StartUp()
+    Lobby()
