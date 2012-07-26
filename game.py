@@ -36,6 +36,7 @@ COLORS = (BLUE, RED, GREEN, YELLOW, PINK, ORANGE, BROWN, GREY)
 
 # Initialization:
 pygame.init()
+def TicksMs(): return time.time()*1000
 #pygame.mixer.init(frequency=11025, buffer=128) # TODO: fix sound delay
 pygame.display.set_caption("KnatanK")
 SCREEN = pygame.display.set_mode((640, 480))
@@ -347,11 +348,13 @@ def Game(tanks):
 
     global TURN
 
+    totalnetdelay = 0.0
+    totalupdatedelay = 0.0
+
     event.set_allowed(pygame.QUIT)
     while not event.peek(pygame.QUIT):
         TURN += 1
-        cycletimer = time.time() # pygame.time.get_ticks()
-
+        netdelay = TicksMs()
         packet = LocalControl.Instance.update()
         while True:
             SOCKET.sendto(packet, BROADCAST_ADDRESS)
@@ -364,18 +367,21 @@ def Game(tanks):
             remote = SOCKET.recv(100)
             if remote[0] == '(' and RemoteControl.parse(remote):
                 break
+        netdelay = TicksMs() - netdelay
+        totalnetdelay += netdelay
 
-        clock.tick(20) # Throttle: max 20 ticks per second
+        clock.tick(20) # Throttle: max 20 ticks per second (50ms/tick)
 
+        updatedelay = TicksMs()
         Sprite.updateall()
-
         BLIT(background, (0, 0))
         Sprite.drawall()
-
         BLIT(font.render(infoline, False, YELLOW), infoxy)
         pygame.display.flip()
 
-        infoline = 'FPS: %0.1f' % (clock.get_fps())
-        infoline += ', cycle takes: %.1f ms.' %((time.time()-cycletimer)*1000)
-        dx, dy = tanks[0].targetx - tanks[0].x, tanks[0].targety - tanks[0].y
-        infoline += ', dx=%d, dy=%d' %(dx, dy)
+        updatedelay = TicksMs() - updatedelay
+        totalupdatedelay += updatedelay
+        infoline = ( 'FPS: %0.1f' % (clock.get_fps()) + ', network delays %0.1f'
+            % netdelay + ' ms (avg=%0.1f' % (totalnetdelay/TURN)
+            + '), update takes %0.1f' % updatedelay + ' ms (avg=%0.1f'
+            % (totalnetdelay/TURN) + ').')
