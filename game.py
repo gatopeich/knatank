@@ -144,11 +144,9 @@ class LocalControl:
         self.tank.targety *= 2 # Perspective
         self.tank.fire = pygame.mouse.get_pressed()[0]
 
-        from pickle import dumps
+        from cPickle import dumps
         packet = dumps((TURN, self.tn, self.tank.headto, self.tank.targetx
-            , self.tank.targety, self.tank.fire))
-#        print "=>",repr((TURN, self.tn, self.tank.headto, self.tank.targetx
-#            , self.tank.targety, self.tank.fire))
+            , self.tank.targety, self.tank.fire),1)
         return packet
 
 class RemoteControl:
@@ -164,17 +162,19 @@ class RemoteControl:
         self.tank.fire = fire
     @staticmethod
     def parse(packet):
-        from pickle import loads
-        turn, tn, headto, targetx, targety, fire = loads(packet)
-#        print "<=", repr(loads(packet))
-        if LocalControl.Instance.tn==tn or TURN!=turn or RemoteControl.Parsed[tn]==turn:
-            return False
-        RemoteControl.All[tn].update(headto, targetx, targety, fire)
-        RemoteControl.Parsed[tn] = turn
+        if len(RemoteControl.All) == 0: return True
+        if packet[0] == '(':
+            from cPickle import loads
+            turn, tn, headto, targetx, targety, fire = loads(packet)
+            #print "<=", repr(loads(packet))
+            if LocalControl.Instance.tn==tn or TURN!=turn or RemoteControl.Parsed[tn]==turn:
+                return False
+            RemoteControl.All[tn].update(headto, targetx, targety, fire)
+            RemoteControl.Parsed[tn] = turn
         for t in RemoteControl.Parsed.itervalues():
             if t != TURN:
                 return False
-        return True # Done parsing
+        return True # Done parsing current turn
 
 class Trail(Sprite):
     def __init__(self, color, x, y):
@@ -346,31 +346,44 @@ def Game(tanks):
     infoline = ''
     infoxy = (10, SCREEN_HEIGHT - font.get_linesize())
 
-    global TURN
-
+    SOCKET.settimeout(0.050)
     totalnetdelay = 0.0
     totalupdatedelay = 0.0
-
+    lastpacket = '!'
     event.set_allowed(pygame.QUIT)
     while not event.peek(pygame.QUIT):
+        global TURN
         TURN += 1
         netdelay = TicksMs()
-        packet = LocalControl.Instance.update()
-        while True:
-            SOCKET.sendto(packet, BROADCAST_ADDRESS)
-            remote = SOCKET.recv(100)
-            if remote[0] == '(' and RemoteControl.parse(remote):
-                break
-            remote = SOCKET.recv(100)
-            if remote[0] == '(' and RemoteControl.parse(remote):
-                break
-            remote = SOCKET.recv(100)
-            if remote[0] == '(' and RemoteControl.parse(remote):
-                break
+        mypacket = LocalControl.Instance.update()
+
+        try: SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
+        except socket.timeout: print "Timeout sending turn",TURN
+
+        while not event.peek(pygame.QUIT):
+            try:
+                remote = SOCKET.recv(100)
+                if RemoteControl.parse(remote):
+                    break
+                continue
+            except socket.timeout:
+                pass #print "Timeout receiving turn",TURN
+
+            # Somebody may be out of sync, resend last 2 packets:
+            try:
+                SOCKET.sendto(lastpacket, BROADCAST_ADDRESS)
+                SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
+            except socket.timeout:
+                pass #print "Timeout sending turn",TURN
+
+        lastpacket = mypacket
+        try: SOCKET.sendto(lastpacket, socket.MSG_DONTWAIT, BROADCAST_ADDRESS)
+        except socket.timeout: print "Timeout resending turn",TURN
+
         netdelay = TicksMs() - netdelay
         totalnetdelay += netdelay
 
-        clock.tick(20) # Throttle: max 20 ticks per second (50ms/tick)
+        clock.tick(30) # Throttle: max ticks per second
 
         updatedelay = TicksMs()
         Sprite.updateall()

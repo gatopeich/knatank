@@ -32,6 +32,11 @@ from game import RED, YELLOW, WHITE, BLACK, FONT_TITLE, FONT_MENU, TANKS
 from game import SCREEN_HEIGHT, SCREEN_WIDTH, FILL, BLIT, Game
 from game import SOCKET, PORT, BROADCAST_ADDRESS
 
+import signal
+def signal_handler(signal, frame):
+    pygame.quit()
+    exit
+signal.signal(signal.SIGINT, signal_handler)
 
 def Lobby():
     # Start network connections
@@ -39,7 +44,7 @@ def Lobby():
     SOCKET.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     SOCKET.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     SOCKET.bind(('', PORT))
-    #SOCKET.settimeout(0.010)
+    SOCKET.settimeout(0.100)
     #SOCKET.connect(BROADCAST_ADDRESS) # TODO: connect to broadcast port?!
 
     players = []
@@ -78,7 +83,7 @@ def Lobby():
                 bisect.insort(players, msg)
                 info = str(len(players)) + ' players connected.'
                 print "New player from", address, ":", msg, ".", info
-        except socket.timeout: print "Timeout..."
+        except socket.timeout: pass
 
         FILL(YELLOW, Rect(40, 40, SCREEN_WIDTH-80, SCREEN_HEIGHT-80))
         xy = XY(50, 50)
