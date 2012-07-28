@@ -68,6 +68,8 @@ def Lobby():
             or (e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE) ):
                 ready_to_start = True
                 SOCKET.sendto('START', BROADCAST_ADDRESS)
+                SOCKET.sendto('START', BROADCAST_ADDRESS)
+                SOCKET.sendto('START', BROADCAST_ADDRESS)
             elif( e.type == pygame.QUIT
             or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE) ):
                 print "User quit."
@@ -93,8 +95,7 @@ def Lobby():
         xy = xy + XY(0, FONT_MENU.get_linesize())
         for i in xrange(len(players)):
             tank = TANKS[i]
-            BLIT(tank.bodies[3], xy)
-            BLIT(tank.turrets[3], xy)
+            tank.render(xy)
             BLIT(FONT_MENU.render("Player " + str(i+1)
                 + (" (you!)" if players[i] == my_id else "")
                 , True, BLACK, YELLOW)

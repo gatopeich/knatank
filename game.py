@@ -6,7 +6,7 @@ All rights reserved until I find an adequate license
 
 import pygame, time, math, bisect
 from pygame import draw, event, Rect
-from utility import load_image, load_multiimage, load_sound, ints
+from utility import load_image, load_multiimage, load_sound, ints, XY
 
 ### GLOBALS
 
@@ -191,18 +191,18 @@ class Tank(Sprite):
         Sprite.__init__(self, y)
         Tank.All.append(self)
         self.bodies = load_multiimage('tank_body.png', 8, color)
-        self.turrets = load_multiimage('tank_turret.png', 8, color)
+        #self.turrets = load_multiimage('tank_turret.png', 8, color)
+        self.turrets = load_multiimage('happydays8+turret.png', 8, color)
         self.sx, self.sy = self.bodies[0].get_size()
         w = self.sx
         self.rect = Rect(x-w/2, y-w/2, w, w).inflate(-8,-8)
         self.x, self.y = x, y
         self.color = color
-        self.heading = 2 # SE
+        self.heading = self.facing = 2 # SE
         self.sound = None
         #self.trail = tuple(Trail(self.color, x, y) for i in xrange(7))
         self.readyamo = 5
         self.reloading = 0
-        self.facing = None
         # Controls:
         self.headto, self.fire, self.targetx, self.targety = None, 0, x, y
 
@@ -262,12 +262,14 @@ class Tank(Sprite):
             vx, vy = 10.0*dx/distance, 10.0*dy/distance
             Bullet(self.x+4*vx, self.y+4*vy, vx, vy)
 
-    def draw(self):
-        xy = self.x-self.sx/2, (self.y-self.sy-TANK_HEIGHT)/2
+    def render(self, xy):
         #draw.line(SCREEN, BLACK, (self.x-30, self.y/2), (self.x+30, self.y/2))
         #draw.line(SCREEN, BLACK, (self.x, self.y/2-20), (self.x, self.y/2+20))
         BLIT(self.bodies[self.heading], xy)
-        BLIT(self.turrets[self.facing], xy)
+        BLIT(self.turrets[self.facing], XY(0,-17)+xy)
+
+    def draw(self):
+        self.render((self.x-self.sx/2, (self.y-self.sy-TANK_HEIGHT)/2))
 
     def explode(self):
         Explosion(self.sx, self.rect.center)
@@ -357,8 +359,10 @@ def Game(tanks):
         netdelay = TicksMs()
         mypacket = LocalControl.Instance.update()
 
-        try: SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
-        except socket.timeout: print "Timeout sending turn",TURN
+        try:
+            SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
+            SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
+        except socket.timeout: print "Buffer overflow sending turn",TURN
 
         while not event.peek(pygame.QUIT):
             try:
