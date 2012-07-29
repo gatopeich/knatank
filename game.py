@@ -7,17 +7,15 @@ All rights reserved until I find an adequate license
 import pygame, time, math, bisect
 from pygame import draw, event, Rect
 from utility import load_image, load_multiimage, load_sound, ints, XY
+from networking import SEND, RECEIVE
 
 ### GLOBALS
-
-# Networking
-import socket
-SOCKET = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-PORT = 55555
-BROADCAST = '<broadcast>'
-BROADCAST_ADDRESS = (BROADCAST, PORT)
+FPS = 30
+MAX_BULLETS = 3
+RELOAD_TIME = FPS
 
 # Dimensions
+SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 BULLET_HEIGHT = 10
 TANK_HEIGHT = 10
 
@@ -36,21 +34,24 @@ COLORS = (BLUE, RED, GREEN, YELLOW, PINK, ORANGE, BROWN, GREY)
 
 # Initialization:
 pygame.init()
-def TicksMs(): return time.time()*1000
-#pygame.mixer.init(frequency=11025, buffer=128) # TODO: fix sound delay
+#pygame.mixer.init(frequency=11025, buffer=128) # Small buffer for low delay
 pygame.display.set_caption("KnatanK")
-SCREEN = pygame.display.set_mode((640, 480))
+SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+BACKGROUND = SCREEN.copy()
 
+# Global methods:
+def TicksMs(): return time.time()*1000
 BLIT = SCREEN.blit
 FILL = SCREEN.fill
 
 SCREEN_WIDTH, SCREEN_HEIGHT = SCREEN.get_size()
 FIELD_WIDTH, FIELD_HEIGHT = SCREEN_WIDTH, SCREEN_HEIGHT*2
 
+FONT = pygame.font.Font(None, 24)
+FONT_MENU = pygame.font.Font(None, 30)
 FONT_TITLE = pygame.font.Font(None, 100)
 FONT_TITLE.set_bold(True)
 FONT_TITLE.set_italic(True)
-FONT_MENU = pygame.font.Font(None, 30)
 
 # Sounds:
 SOUND_WALK = load_sound('WalkingToyLoop.wav')
@@ -123,11 +124,10 @@ class Wall(Sprite):
 
 class LocalControl:
     Instance = None
-    def __init__(self, tn, tank, keymap = (pygame.K_UP, pygame.K_RIGHT
-            , pygame.K_DOWN, pygame.K_LEFT)):
+    def __init__(self, tn, tank):
         self.tn = tn
         self.tank = tank
-        self.keymap = keymap
+        self.keymap = (pygame.K_w, pygame.K_d, pygame.K_s, pygame.K_a)
         global LOCAL_CONTROL
         LocalControl.Instance = self
     def update(self):
@@ -142,7 +142,8 @@ class LocalControl:
         self.tank.targetx, self.tank.targety = pygame.mouse.get_pos()
         self.tank.targety += BULLET_HEIGHT
         self.tank.targety *= 2 # Perspective
-        self.tank.fire = pygame.mouse.get_pressed()[0]
+        self.tank.fire = min(self.tank.readyamo, self.tank.fire +
+             sum(e.button == 1 for e in event.get(pygame.MOUSEBUTTONDOWN)))
 
         from cPickle import dumps
         packet = dumps((TURN, self.tn, self.tank.headto, self.tank.targetx
@@ -198,10 +199,10 @@ class Tank(Sprite):
         self.rect = Rect(x-w/2, y-w/2, w, w).inflate(-8,-8)
         self.x, self.y = x, y
         self.color = color
-        self.heading = self.facing = 2 # SE
+        self.heading = self.facing = 3 # SE
         self.sound = None
         #self.trail = tuple(Trail(self.color, x, y) for i in xrange(7))
-        self.readyamo = 5
+        self.readyamo = 3
         self.reloading = 0
         # Controls:
         self.headto, self.fire, self.targetx, self.targety = None, 0, x, y
@@ -243,24 +244,22 @@ class Tank(Sprite):
         dx = self.targetx - self.x
         dy = self.targety - self.y
         self.facing = direction(dx, dy)
-        #for i in xrange(7):
-        #    self.trail[i].x = ((i+1)*self.targetx+(7-i)*self.x)/8
-        #    self.trail[i].y = ((i+1)*self.targety+(7-i)*self.y)/8
+        # TODO: Show mire
 
-        # Reload one bullet every 10 ticks:
-        if self.reloading:
-            self.reloading -= 1
-            if not self.reloading:
-                self.readyamo += 1
-                if self.readyamo < 5:
-                    self.reloading = 10
-
-        if self.readyamo and self.fire:
+        if self.fire and self.readyamo:
+            self.fire -= 1
             self.readyamo -= 1
-            self.reloading = 10
+            self.reloading = RELOAD_TIME # STRATEGY: Firing restarts reload
             distance = math.hypot(dx, dy)
             vx, vy = 10.0*dx/distance, 10.0*dy/distance
             Bullet(self.x+4*vx, self.y+4*vy, vx, vy)
+        elif self.reloading:
+            self.reloading -= 1
+            if not self.reloading:
+                # TODO: Reload sound!
+                self.readyamo += 1
+                if self.readyamo < MAX_BULLETS:
+                    self.reloading = RELOAD_TIME
 
     def render(self, xy):
         #draw.line(SCREEN, BLACK, (self.x-30, self.y/2), (self.x+30, self.y/2))
@@ -271,7 +270,7 @@ class Tank(Sprite):
     def draw(self):
         self.render((self.x-self.sx/2, (self.y-self.sy-TANK_HEIGHT)/2))
 
-    def explode(self):
+    def hit(self):
         Explosion(self.sx, self.rect.center)
         self.dissapear()
 
@@ -307,7 +306,7 @@ class Bullet(Sprite):
         self.rect.center = self.x, self.y
         tankhit = self.rect.collidelist(Tank.All)
         if tankhit >= 0:
-            Tank.All[tankhit].explode()
+            Tank.All[tankhit].hit()
             self.explode()
         elif self.rect.collidelist(Wall.All) >= 0:
             self.explode()
@@ -320,7 +319,7 @@ class Bullet(Sprite):
         draw.circle(SCREEN, WHITE, ints(self.x, self.y/2-BULLET_HEIGHT), 3)
         draw.line(SCREEN, BLACK, (self.x-1, self.y/2), (self.x+1, self.y/2))
 
-def DrawBorders():
+def DrawLevel():
     margin = 0
     h = 20
     v = (20+BULLET_HEIGHT)*2
@@ -328,77 +327,72 @@ def DrawBorders():
     Wall(-margin, FIELD_HEIGHT-v, FIELD_WIDTH+2*margin, v+margin)
     Wall(-margin,        -margin, margin+h, FIELD_HEIGHT+2*margin)
     Wall(FIELD_WIDTH-h,  -margin, h+margin, FIELD_HEIGHT+2*margin)
-
-TURN = 0
-def Game(tanks):
-    print "Starting game..."
-    DrawBorders()
-
     tile = load_image('ground.png')
     tile_width, tile_height = tile.get_size()
 
-    font = pygame.font.Font(None, 24)
-
-    background = SCREEN.copy()
     for x in xrange(1+SCREEN_WIDTH/tile_width):
         for y in xrange(1+SCREEN_HEIGHT/tile_height):
-            background.blit(tile, (x*tile_width, y*tile_height))
+            BACKGROUND.blit(tile, (x*tile_width, y*tile_height))
+
+TURN = 0
+def Game(nplayers):
+    print "Starting game..."
+    DrawLevel()
 
     clock = pygame.time.Clock()
     infoline = ''
-    infoxy = (10, SCREEN_HEIGHT - font.get_linesize())
+    infoxy = (10, SCREEN_HEIGHT - FONT.get_linesize())
 
-    SOCKET.settimeout(0.050)
     totalnetdelay = 0.0
     totalupdatedelay = 0.0
     lastpacket = '!'
-    event.set_allowed(pygame.QUIT)
-    while not event.peek(pygame.QUIT):
+    event.set_allowed(None)
+    event.set_allowed((pygame.QUIT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN))
+    while True:
         global TURN
         TURN += 1
-        netdelay = TicksMs()
         mypacket = LocalControl.Instance.update()
 
-        try:
-            SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
-            SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
-        except socket.timeout: print "Buffer overflow sending turn",TURN
+        netdelay = -TicksMs()
+        SEND(mypacket)
+        SEND(mypacket) # 2X redundancy
 
-        while not event.peek(pygame.QUIT):
-            try:
-                remote = SOCKET.recv(100)
-                if RemoteControl.parse(remote):
+        missing_data = True
+        while missing_data:
+            # Parse events while packets fly
+            for e in event.get((pygame.QUIT, pygame.KEYDOWN)):
+                if( e.type == pygame.QUIT or (e.type == pygame.KEYDOWN
+                        and e.key == pygame.K_ESCAPE) ):
+                    print "User quit."
+                    exit()
+
+            for remote_msg in RECEIVE():
+                if RemoteControl.parse(remote_msg):
+                    missing_data = False
                     break
-                continue
-            except socket.timeout:
-                pass #print "Timeout receiving turn",TURN
+            if missing_data:
+                SEND(lastpacket)
+                SEND(mypacket)
 
-            # Somebody may be out of sync, resend last 2 packets:
-            try:
-                SOCKET.sendto(lastpacket, BROADCAST_ADDRESS)
-                SOCKET.sendto(mypacket, BROADCAST_ADDRESS)
-            except socket.timeout:
-                pass #print "Timeout sending turn",TURN
+        netdelay += TicksMs()
 
         lastpacket = mypacket
-        try: SOCKET.sendto(lastpacket, socket.MSG_DONTWAIT, BROADCAST_ADDRESS)
-        except socket.timeout: print "Timeout resending turn",TURN
+        SEND(lastpacket)
 
-        netdelay = TicksMs() - netdelay
         totalnetdelay += netdelay
 
-        clock.tick(30) # Throttle: max ticks per second
-
-        updatedelay = TicksMs()
+        updatedelay = -TicksMs()
         Sprite.updateall()
-        BLIT(background, (0, 0))
+        BLIT(BACKGROUND, (0, 0))
         Sprite.drawall()
-        BLIT(font.render(infoline, False, YELLOW), infoxy)
+        BLIT(FONT.render(infoline, False, YELLOW), infoxy)
         pygame.display.flip()
 
-        updatedelay = TicksMs() - updatedelay
+        updatedelay += TicksMs()
         totalupdatedelay += updatedelay
         infoline = ( 'FPS: %0.1f' % (clock.get_fps()) + ', network delays %0.1f'
             % netdelay + ' ms (avg=%0.1f' % (totalnetdelay/TURN)
             + '), update takes %0.1f' % updatedelay + ' ms (avg=%0.1f'
             % (totalnetdelay/TURN) + ').')
+
+        clock.tick(FPS) # Throttle: max ticks per second

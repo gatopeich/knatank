@@ -24,13 +24,13 @@ DONE:
 * FIX Multiple collision -> ValueError: All.remove(x): x not in All.
 """
 
-import pygame, time, bisect
+import pygame, time
 from pygame import event, Rect
 from utility import XY
 import game
 from game import RED, YELLOW, WHITE, BLACK, FONT_TITLE, FONT_MENU, TANKS
 from game import SCREEN_HEIGHT, SCREEN_WIDTH, FILL, BLIT, Game
-from game import SOCKET, PORT, BROADCAST_ADDRESS
+from networking import SEND, RECVFROM
 
 import signal
 def signal_handler(signal, frame):
@@ -39,82 +39,80 @@ def signal_handler(signal, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 def Lobby():
-    # Start network connections
-    import socket
-    SOCKET.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    SOCKET.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    SOCKET.bind(('', PORT))
-    SOCKET.settimeout(0.100)
-    #SOCKET.connect(BROADCAST_ADDRESS) # TODO: connect to broadcast port?!
-
-    players = []
-    import uuid
-    my_id = uuid.uuid4().hex
-    info = "Waiting for players..."
-
     title = FONT_TITLE.render('KnatanK', True, RED, YELLOW)
     start_button = FONT_TITLE.render(' Start! ', True, WHITE, RED)
     start_button = ( start_button
         , Rect(60, SCREEN_HEIGHT-60-FONT_TITLE.get_height()
             , *start_button.get_size()))
 
+    info = "Waiting for players..."
+
     event.set_allowed((pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN, pygame.QUIT))
     event.clear()
-    ready_to_start = False
-    while not ready_to_start:
+
+    players = {}
+    import uuid
+    my_id = uuid.uuid4().get_hex()
+    I_am_ready = False
+    all_ready = False
+    while not all_ready:
         for e in event.get():
             if((e.type == pygame.MOUSEBUTTONDOWN
                  and start_button[1].collidepoint(e.pos))
             or (e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE) ):
-                ready_to_start = True
-                SOCKET.sendto('START', BROADCAST_ADDRESS)
-                SOCKET.sendto('START', BROADCAST_ADDRESS)
-                SOCKET.sendto('START', BROADCAST_ADDRESS)
+                I_am_ready = True
             elif( e.type == pygame.QUIT
             or (e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE) ):
                 print "User quit."
                 pygame.quit()
-                return
+                exit()
 
-        try:
-            SOCKET.sendto(my_id, BROADCAST_ADDRESS) #SOCKET.send(my_id)
-            msg, address = SOCKET.recvfrom(100)
-            if msg == 'START':
-                break
-            if msg not in players:
-                bisect.insort(players, msg)
+        from cPickle import dumps, loads
+        SEND(b'KL' + dumps((my_id, I_am_ready)))
+        for msg, address in RECVFROM():
+            if msg.startswith(b'KL'):
+                player = loads(msg[2:])
+                players[player[0]] = player
                 info = str(len(players)) + ' players connected.'
-                print "New player from", address, ":", msg, ".", info
-        except socket.timeout: pass
+                if player[0] not in players:
+                    print "New player from", address, ":", player, ".", info
+                    print players
 
         FILL(YELLOW, Rect(40, 40, SCREEN_WIDTH-80, SCREEN_HEIGHT-80))
         xy = XY(50, 50)
         BLIT(title, xy)
         xy = xy + XY(0, FONT_TITLE.get_linesize())
         BLIT(FONT_MENU.render(info, True, BLACK, YELLOW), xy)
-        xy = xy + XY(0, FONT_MENU.get_linesize())
-        for i in xrange(len(players)):
-            tank = TANKS[i]
+        xy = xy + XY(0, FONT_MENU.get_height()*2)
+
+        # Brief up all players:
+        playerlist = sorted(players.itervalues())
+        for p, tank, player in zip(xrange(1,99), TANKS, playerlist):
             tank.render(xy)
-            BLIT(FONT_MENU.render("Player " + str(i+1)
-                + (" (you!)" if players[i] == my_id else "")
+            BLIT(FONT_MENU.render("Player " + str(p)
+                + (" (you!)" if player[0] == my_id else "")
+                + (" READY!" if player[1] else "")
                 , True, BLACK, YELLOW)
                 , xy + XY(tank.sx+10, (tank.sy-FONT_MENU.get_height())/2))
             xy += XY(0, tank.sy)
         BLIT(*start_button)
 
+        all_ready = players and all(p[1] for p in playerlist)
+
         pygame.display.flip()
         time.sleep(1)
 
-    global NPLAYERS
-    NPLAYERS = len(players)
-    for i in xrange(NPLAYERS):
-        if players[i] == my_id:
-            game.LocalControl(i, TANKS[i])
+    for p, tank, player in zip(xrange(1,99), TANKS, playerlist):
+        if player[0] == my_id:
+            game.LocalControl(p, tank)
         else:
-            game.RemoteControl(i, TANKS[i])
+            game.RemoteControl(p, tank)
 
-    Game(TANKS[:len(players)])
+    Game(len(players))
     print "Game Over."
 
-Lobby()
+try:
+    Lobby()
+except (KeyboardInterrupt, SystemExit):
+    print "Shutting down..."
+    pygame.quit()
