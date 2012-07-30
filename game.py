@@ -34,7 +34,7 @@ COLORS = (BLUE, RED, GREEN, YELLOW, PINK, ORANGE, BROWN, GREY)
 
 # Initialization:
 pygame.init()
-#pygame.mixer.init(frequency=11025, buffer=128) # Small buffer for low delay
+pygame.mixer.init(frequency=22050, buffer=128) # Small buffer for low delay
 pygame.display.set_caption("KnatanK")
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 BACKGROUND = SCREEN.copy()
@@ -60,6 +60,10 @@ SOUND_TURN = load_sound('WalkingToyLoop-slow.wav')
 SOUND_TURN.set_volume(.2)
 SOUND_SHOT = load_sound('shot.wav')
 SOUND_SHOT.set_volume(.2)
+SOUND_BOUNCE = load_sound('bounce.wav')
+SOUND_BOUNCE.set_volume(.2)
+SOUND_RELOAD = load_sound('reload.wav')
+SOUND_RELOAD.set_volume(.2)
 SOUND_EXPLOSION = load_sound('explosion.wav')
 SOUND_EXPLOSION.set_volume(.2)
 
@@ -256,6 +260,7 @@ class Tank(Sprite):
         elif self.reloading:
             self.reloading -= 1
             if not self.reloading:
+                SOUND_RELOAD.play()
                 # TODO: Reload sound!
                 self.readyamo += 1
                 if self.readyamo < MAX_BULLETS:
@@ -297,7 +302,7 @@ class Bullet(Sprite):
         SOUND_SHOT.play()
         # 8-bit fixed point:
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
-        # TODO: self.bounces = 1
+        self.bounces = 1
         self.rect = Rect(0,0,3,3)
         Sprite.__init__(self, y)
     def update(self):
@@ -309,6 +314,32 @@ class Bullet(Sprite):
             Tank.All[tankhit].hit()
             self.explode()
         elif self.rect.collidelist(Wall.All) >= 0:
+            if self.bounces:
+                self.bounces -= 1
+                # Try horizontal bounce...
+                if self.rect.move(-self.vx,0).collidelist(Wall.All) < 0:
+                    self.vx = -self.vx
+                    self.x += self.vx
+                    self.rect.centerx = self.x
+                    SOUND_BOUNCE.play()
+                    return
+                # Try vertical:
+                if self.rect.move(0,-self.vy).collidelist(Wall.All) < 0:
+                    self.vy = -self.vy
+                    self.y += self.vy
+                    self.rect.centery = self.y
+                    SOUND_BOUNCE.play()
+                    return
+                # Try both:
+                if self.bounces:
+                    self.vx, self.vy = -self.vx, -self.vy
+                    self.x += self.vx
+                    self.y += self.vy
+                    self.rect.center = self.x, self.y
+                    if self.rect.collidelist(Wall.All) < 0:
+                        self.bounces -= 1
+                        SOUND_BOUNCE.play()
+                        return
             self.explode()
     def explode(self):
         Explosion(10, self.rect.center)
@@ -387,8 +418,8 @@ def Game(nplayers):
         Sprite.drawall()
         BLIT(FONT.render(infoline, False, YELLOW), infoxy)
         pygame.display.flip()
-
         updatedelay += TicksMs()
+
         totalupdatedelay += updatedelay
         infoline = ( 'FPS: %0.1f' % (clock.get_fps()) + ', network delays %0.1f'
             % netdelay + ' ms (avg=%0.1f' % (totalnetdelay/TURN)
