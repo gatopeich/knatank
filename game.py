@@ -90,8 +90,7 @@ class Sprite:
     def __lt__(self, other):
         return self.y < other.y
     def dissapear(self):
-        try: Sprite.All.remove(self)
-        except ValueError: pass # Already removed
+        Sprite.All.remove(self)
 
     def update(self): pass
     def draw(self): pass
@@ -123,8 +122,8 @@ class Wall(Sprite):
         FILL(*self.filltop)
         FILL(*self.fillside)
     def dissapear(self):
-        Sprite.dissapear(self)
         Wall.All.remove(self)
+        Sprite.dissapear(self)
 
 class LocalControl:
     Instance = None
@@ -181,14 +180,18 @@ class RemoteControl:
                 return False
         return True # Done parsing current turn
 
-class Trail(Sprite):
+class Mire(Sprite):
     def __init__(self, color, x, y):
-        self.color = color
-        self.x, self.y = x, y
         Sprite.__init__(self, y)
+        self.color = color
+        self.aim(x,y)
+    def aim(self, x, y):
+        self.x, self.y = x, y-30
     def draw(self):
-        draw.circle(SCREEN, self.color, ints(self.x, self.y/2-BULLET_HEIGHT), 3, 1)
-        draw.line(SCREEN, BLACK, (self.x-1, self.y/2), (self.x+1, self.y/2))
+        x,y = ints(self.x,(self.y+30)/2)
+        draw.circle(SCREEN, self.color, (x,y+1), 3, 0)
+        draw.line(SCREEN, self.color, (x-8, y-4), (x+10, y+5), 2)
+        draw.line(SCREEN, self.color, (x-10, y+5), (x+8, y-4), 2)
 
 class Tank(Sprite):
     All = []
@@ -205,7 +208,7 @@ class Tank(Sprite):
         self.color = color
         self.heading = self.facing = 3 # SE
         self.sound = None
-        #self.trail = tuple(Trail(self.color, x, y) for i in xrange(7))
+        self.mire = Mire(self.color, x, y)
         self.readyamo = 3
         self.reloading = 0
         # Controls:
@@ -245,10 +248,9 @@ class Tank(Sprite):
         else:
             self.noise(None)
 
-        dx = self.targetx - self.x
-        dy = self.targety - self.y
+        self.mire.aim(self.targetx, self.targety)
+        dx,dy = self.targetx - self.x, self.targety - self.y
         self.facing = direction(dx, dy)
-        # TODO: Show mire
 
         if self.fire and self.readyamo:
             self.fire -= 1
@@ -298,6 +300,7 @@ class Explosion(Sprite):
             self.dissapear()
 
 class Bullet(Sprite):
+    All = []
     def __init__(self, x, y, vx, vy):
         SOUND_SHOT.play()
         # 8-bit fixed point:
@@ -305,6 +308,7 @@ class Bullet(Sprite):
         self.bounces = 1
         self.rect = Rect(0,0,3,3)
         Sprite.__init__(self, y)
+        Bullet.All.append(self)
     def update(self):
         self.x += self.vx
         self.y += self.vy
@@ -313,7 +317,8 @@ class Bullet(Sprite):
         if tankhit >= 0:
             Tank.All[tankhit].hit()
             self.explode()
-        elif self.rect.collidelist(Wall.All) >= 0:
+            return
+        if self.rect.collidelist(Wall.All) >= 0:
             if self.bounces:
                 self.bounces -= 1
                 # Try horizontal bounce...
@@ -341,8 +346,19 @@ class Bullet(Sprite):
                         SOUND_BOUNCE.play()
                         return
             self.explode()
+            return
+        r = self.rect.copy()
+        self.rect.y += 777 # avoid self collision
+        for aoi in (r, r.move(self.vx,self.vy), r.move(-self.vx,-self.vy)):
+            colliding = aoi.collidelist(Bullet.All)
+            if colliding >= 0:
+                Bullet.All[colliding].explode()
+                self.explode()
+        self.rect = r # restore
+
     def explode(self):
-        Explosion(10, self.rect.center)
+        Explosion(10, (self.x, self.y))
+        Bullet.All.remove(self)
         self.dissapear()
     def draw(self):
         draw.circle(SCREEN, WHITE
