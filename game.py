@@ -10,7 +10,7 @@ from utility import load_image, load_multiimage, load_sound, ints, XY
 from networking import SEND, RECEIVE
 
 ### GLOBALS
-FPS = 30
+FPS = 40
 MAX_BULLETS = 3
 RELOAD_TIME = FPS
 
@@ -215,6 +215,7 @@ class Tank(Sprite):
         self.headto, self.fire, self.targetx, self.targety = None, 0, x, y
 
     def dissapear(self):
+        if self.sound: self.sound.stop()
         Sprite.dissapear(self)
         Tank.All.remove(self)
         #for t in self.trail: t.dissapear()
@@ -224,8 +225,8 @@ class Tank(Sprite):
             if self.sound:
                 self.sound.stop()
             self.sound = sound
-            if self.sound:
-                self.sound.play(-1)
+            if sound:
+                sound.play(-1)
 
     def update(self):
         if self.headto == self.heading:
@@ -306,7 +307,7 @@ class Bullet(Sprite):
         # 8-bit fixed point:
         self.x, self.y, self.vx, self.vy = x, y, vx, vy
         self.bounces = 1
-        self.rect = Rect(0,0,3,3)
+        self.rect = Rect(0,0,4,4)
         Sprite.__init__(self, y)
         Bullet.All.append(self)
     def update(self):
@@ -322,34 +323,39 @@ class Bullet(Sprite):
             if self.bounces:
                 self.bounces -= 1
                 # Try horizontal bounce...
-                if self.rect.move(-self.vx,0).collidelist(Wall.All) < 0:
+                r = self.rect.copy()
+                bounce_x = self.x-self.vx
+                r.centerx = bounce_x
+                if r.collidelist(Wall.All) < 0:
                     self.vx = -self.vx
-                    self.x += self.vx
-                    self.rect.centerx = self.x
+                    self.x = bounce_x
+                    self.rect = r
                     SOUND_BOUNCE.play()
                     return
                 # Try vertical:
-                if self.rect.move(0,-self.vy).collidelist(Wall.All) < 0:
+                bounce_y = self.y-self.vy
+                r.center = self.x, bounce_y
+                if r.collidelist(Wall.All) < 0:
                     self.vy = -self.vy
-                    self.y += self.vy
-                    self.rect.centery = self.y
+                    self.y = bounce_y
+                    self.rect = r
                     SOUND_BOUNCE.play()
                     return
                 # Try both:
                 if self.bounces:
-                    self.vx, self.vy = -self.vx, -self.vy
-                    self.x += self.vx
-                    self.y += self.vy
-                    self.rect.center = self.x, self.y
+                    r.centerx = bounce_x
                     if self.rect.collidelist(Wall.All) < 0:
                         self.bounces -= 1
+                        self.vx, self.vy = -self.vx, -self.vy
+                        self.x, self.y = bounce_x, bounce_y
+                        self.rect = r
                         SOUND_BOUNCE.play()
                         return
             self.explode()
             return
         r = self.rect.copy()
         self.rect.y += 777 # avoid self collision
-        for aoi in (r, r.move(self.vx,self.vy), r.move(-self.vx,-self.vy)):
+        for aoi in (r, r.move(-self.vx,-self.vy)):
             colliding = aoi.collidelist(Bullet.All)
             if colliding >= 0:
                 Bullet.All[colliding].explode()
