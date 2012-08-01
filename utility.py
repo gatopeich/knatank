@@ -58,7 +58,7 @@ class XY(tuple):
     def __add__(self, rhs): return XY(self[0]+rhs[0], self[1]+rhs[1])
     def __sub__(self, rhs): return XY(self[0]-rhs[0], self[1]-rhs[1])
     def __mul__(self, rhs): return XY(rhs*self[0], rhs*self[1])
-    def __div__(self, rhs): return XY(self[0]*rhs, self[1]/rhs)
+    def __div__(self, rhs): return XY(self[0]/rhs, self[1]/rhs)
 
 def ints(*numbers): return tuple(int(n) for n in numbers)
 

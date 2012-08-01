@@ -10,9 +10,9 @@ from utility import load_image, load_multiimage, load_sound, ints, XY
 from networking import SEND, RECEIVE
 
 ### GLOBALS
-FPS = 40
+MAXFPS = 40
 MAX_BULLETS = 3
-RELOAD_TIME = FPS
+RELOAD_TIME = MAXFPS
 
 # Dimensions
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
@@ -33,10 +33,11 @@ BROWN = pygame.Color('brown')
 COLORS = (BLUE, RED, GREEN, YELLOW, PINK, ORANGE, BROWN, GREY)
 
 # Initialization:
+pygame.mixer.pre_init(frequency=22050, buffer=256) # low latency settings
 pygame.init()
-pygame.mixer.init(frequency=22050, buffer=128) # Small buffer for low delay
 pygame.display.set_caption("KnatanK")
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.mouse.set_cursor(*pygame.cursors.broken_x)
 BACKGROUND = SCREEN.copy()
 
 # Global methods:
@@ -257,14 +258,11 @@ class Tank(Sprite):
             self.fire -= 1
             self.readyamo -= 1
             self.reloading = RELOAD_TIME # STRATEGY: Firing restarts reload
-            distance = math.hypot(dx, dy)
-            vx, vy = 10.0*dx/distance, 10.0*dy/distance
-            Bullet(self.x+4*vx, self.y+4*vy, vx, vy)
+            Bullet(self.x, self.y, dx, dy)
         elif self.reloading:
             self.reloading -= 1
             if not self.reloading:
                 SOUND_RELOAD.play()
-                # TODO: Reload sound!
                 self.readyamo += 1
                 if self.readyamo < MAX_BULLETS:
                     self.reloading = RELOAD_TIME
@@ -301,15 +299,15 @@ class Explosion(Sprite):
             self.dissapear()
 
 class Bullet(Sprite):
-    All = []
-    def __init__(self, x, y, vx, vy):
+    All = {}
+    def __init__(self, x, y, dx, dy):
         SOUND_SHOT.play()
-        # 8-bit fixed point:
-        self.x, self.y, self.vx, self.vy = x, y, vx, vy
-        self.bounces = 1
-        self.rect = Rect(0,0,4,4)
-        Sprite.__init__(self, y)
-        Bullet.All.append(self)
+        self.vx, self.vy = vx, vy = XY(dx, dy)*(10/math.hypot(dx, dy))
+        Sprite.__init__(self, y + 4*vy)
+        self.x = x + 4*vx
+        self.rect = Rect(0,0,5,5)
+        self.bounces = 2
+        Bullet.All[self] = self
     def update(self):
         self.x += self.vx
         self.y += self.vy
@@ -322,15 +320,15 @@ class Bullet(Sprite):
         if self.rect.collidelist(Wall.All) >= 0:
             if self.bounces:
                 self.bounces -= 1
-                # Try horizontal bounce...
                 r = self.rect.copy()
+                # Try horizontal bounce...
                 bounce_x = self.x-self.vx
                 r.centerx = bounce_x
                 if r.collidelist(Wall.All) < 0:
+                    SOUND_BOUNCE.play()
                     self.vx = -self.vx
                     self.x = bounce_x
                     self.rect = r
-                    SOUND_BOUNCE.play()
                     return
                 # Try vertical:
                 bounce_y = self.y-self.vy
@@ -345,26 +343,29 @@ class Bullet(Sprite):
                 if self.bounces:
                     r.centerx = bounce_x
                     if self.rect.collidelist(Wall.All) < 0:
+                        SOUND_BOUNCE.play()
                         self.bounces -= 1
                         self.vx, self.vy = -self.vx, -self.vy
                         self.x, self.y = bounce_x, bounce_y
                         self.rect = r
-                        SOUND_BOUNCE.play()
                         return
             self.explode()
             return
         r = self.rect.copy()
-        self.rect.y += 777 # avoid self collision
-        for aoi in (r, r.move(-self.vx,-self.vy)):
-            colliding = aoi.collidelist(Bullet.All)
-            if colliding >= 0:
-                Bullet.All[colliding].explode()
-                self.explode()
+        self.rect.y = -999 # avoid self collision by going OOS
+        nearby = r.inflate(10,10).collidedictall(Bullet.All)
+        if nearby:
+            for aoi in (r, r.move(-self.vx,-self.vy)):
+                colliding = aoi.collidedict(dict(nearby))
+                if colliding:
+                    colliding[0].explode()
+                    self.explode()
+                    return
         self.rect = r # restore
 
     def explode(self):
         Explosion(10, (self.x, self.y))
-        Bullet.All.remove(self)
+        del Bullet.All[self]
         self.dissapear()
     def draw(self):
         draw.circle(SCREEN, WHITE
@@ -448,4 +449,4 @@ def Game(nplayers):
             + '), update takes %0.1f' % updatedelay + ' ms (avg=%0.1f'
             % (totalnetdelay/TURN) + ').')
 
-        clock.tick(FPS) # Throttle: max ticks per second
+        clock.tick(MAXFPS) # Throttle: max ticks per second
