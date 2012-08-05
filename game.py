@@ -134,6 +134,7 @@ class LocalControl:
         self.keymap = (pygame.K_w, pygame.K_d, pygame.K_s, pygame.K_a)
         global LOCAL_CONTROL
         LocalControl.Instance = self
+        tank.putface('happy')
     def update(self):
         pressed = pygame.key.get_pressed()
         uprightdownleft = tuple(pressed[key] for key in self.keymap)
@@ -161,6 +162,7 @@ class RemoteControl:
         RemoteControl.All[tn] = self
         RemoteControl.Parsed[tn] = None
         self.tank = tank
+        tank.putface('happy')
     def update(self, headto, targetx, targety, fire):
         self.tank.headto = headto
         self.tank.targetx, self.tank.targety = targetx, targety
@@ -181,6 +183,24 @@ class RemoteControl:
                 return False
         return True # Done parsing current turn
 
+class AIControl:
+    All = []
+    def __init__(self, tn, tank):
+        self.tn = tn
+        self.tank = tank
+        self.state = 0
+        tank.putface('bender') # Not human! ;-)
+        AIControl.All.append(self)
+    def update(self):
+        if not self.state:
+            for tank in Tank.All:
+                if tank != self.tank: self.enemy = tank
+            self.tank.headto = (TURN^self.tn)&7
+            self.state = 30
+        self.state -= 1
+        self.tank.targetx, self.tank.targety = self.enemy.x, self.enemy.y
+        self.tank.fire = 1
+
 class Mire(Sprite):
     def __init__(self, color, x, y):
         Sprite.__init__(self, y)
@@ -197,16 +217,16 @@ class Mire(Sprite):
 class Tank(Sprite):
     All = []
     def __init__(self, color, x, y):
+        self.color = color
+        self.x, self.y = x, y
         Sprite.__init__(self, y)
         Tank.All.append(self)
         self.bodies = load_multiimage('tank_body.png', 8, color)
-        #self.turrets = load_multiimage('tank_turret.png', 8, color)
-        self.turrets = load_multiimage('happy+turret.png', 8, color)
-        self.sx, self.sy = self.bodies[0].get_size()
-        w = self.sx
-        self.rect = Rect(x-w/2, y-w/2, w, w).inflate(-8,-8)
-        self.x, self.y = x, y
-        self.color = color
+        self.turrets = load_multiimage('tank_turret.png', 8, color)
+        self.sx, self.sy = self.bodies[0].get_size() # size
+        self.putface('happy')
+        width = self.sx
+        self.rect = Rect(x-width/2, y-width/2, width, width).inflate(-8,-8)
         self.heading = self.facing = 3 # SE
         self.sound = None
         self.mire = Mire(self.color, x, y)
@@ -214,6 +234,11 @@ class Tank(Sprite):
         self.reloading = 0
         # Controls:
         self.headto, self.fire, self.targetx, self.targety = None, 0, x, y
+
+    def putface(self, face):
+        self.faces = load_multiimage('memes/'+face+'8.png', 8, self.color)
+        fw,fh = self.faces[0].get_size()
+        self.faceoffset = XY((self.sx-fw)/2,16-fh)
 
     def dissapear(self):
         if self.sound: self.sound.stop()
@@ -271,10 +296,11 @@ class Tank(Sprite):
         #draw.line(SCREEN, BLACK, (self.x-30, self.y/2), (self.x+30, self.y/2))
         #draw.line(SCREEN, BLACK, (self.x, self.y/2-20), (self.x, self.y/2+20))
         BLIT(self.bodies[self.heading], xy)
-        BLIT(self.turrets[self.facing], XY(0,-17)+xy)
+        BLIT(self.turrets[self.facing], xy)
+        BLIT(self.faces[self.facing], self.faceoffset + xy)
 
     def draw(self):
-        self.render((self.x-self.sx/2, (self.y-self.sy-TANK_HEIGHT)/2))
+        self.render(ints(self.x-self.sx/2,(self.y-self.sy-TANK_HEIGHT)/2))
 
     def hit(self):
         Explosion(self.sx, self.rect.center)
@@ -411,8 +437,11 @@ def Game(nplayers):
         SEND(mypacket)
         SEND(mypacket) # 2X redundancy
 
+        for ai in AIControl.All: ai.update()
+
         missing_data = True
         while missing_data:
+
             # Parse events while packets fly
             for e in event.get((pygame.QUIT, pygame.KEYDOWN)):
                 if( e.type == pygame.QUIT or (e.type == pygame.KEYDOWN

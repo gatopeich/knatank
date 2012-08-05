@@ -102,13 +102,16 @@ def Lobby():
         pygame.display.flip()
         time.sleep(1)
 
-    for p, tank, player in zip(xrange(1,99), TANKS, playerlist):
-        if player[0] == my_id:
-            game.LocalControl(p, tank)
+    nplayers = len(playerlist)
+    for tn, tank in enumerate(TANKS,1):
+        if tn > nplayers:
+            game.AIControl(tn, tank)
+        elif playerlist[tn-1][0] == my_id:
+            game.LocalControl(tn, tank)
         else:
-            game.RemoteControl(p, tank)
+            game.RemoteControl(tn, tank)
 
-    Game(len(players))
+    Game(nplayers)
     print "Game Over."
 
 try:
