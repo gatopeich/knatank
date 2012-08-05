@@ -201,7 +201,7 @@ class Tank(Sprite):
         Tank.All.append(self)
         self.bodies = load_multiimage('tank_body.png', 8, color)
         #self.turrets = load_multiimage('tank_turret.png', 8, color)
-        self.turrets = load_multiimage('happydays8+turret.png', 8, color)
+        self.turrets = load_multiimage('happy+turret.png', 8, color)
         self.sx, self.sy = self.bodies[0].get_size()
         w = self.sx
         self.rect = Rect(x-w/2, y-w/2, w, w).inflate(-8,-8)
